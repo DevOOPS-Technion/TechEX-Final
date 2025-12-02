@@ -1,0 +1,60 @@
+---
+# ============================================
+# TechEX - Main Ansible Playbook
+# ============================================
+# This playbook is used for manual deployments
+# The CI/CD pipeline uses direct SSH commands
+
+- name: Join workers to Kubernetes cluster
+  hosts: workers
+  become: yes
+  vars:
+    master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] }}"
+    
+  tasks:
+    - name: Check if already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet
+
+    - name: Get join command from master
+      delegate_to: "{{ groups['master'][0] }}"
+      slurp:
+        src: /home/ubuntu/join-command.sh
+      register: join_cmd
+      when: not kubelet.stat.exists
+
+    - name: Join cluster
+      shell: "{{ join_cmd.content | b64decode }}"
+      when: not kubelet.stat.exists
+
+    - name: Wait for node
+      pause:
+        seconds: 30
+      when: not kubelet.stat.exists
+
+- name: Mount NFS on workers
+  hosts: workers
+  become: yes
+  vars:
+    nfs_server: "10.0.1.10"
+    
+  tasks:
+    - name: Install NFS client
+      apt:
+        name: nfs-common
+        state: present
+        update_cache: yes
+
+    - name: Create mount point
+      file:
+        path: /mnt/techex-data
+        state: directory
+
+    - name: Mount NFS
+      mount:
+        path: /mnt/techex-data
+        src: "{{ nfs_server }}:/srv/nfs/techex-data"
+        fstype: nfs
+        opts: defaults,_netdev
+        state: mounted

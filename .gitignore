@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+tfplan
+*.pem
+
+# Ansible
+*.retry
+
+# Node
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Local
+.env
+*.log
+
+# Secrets
+SECRETS_TEMPLATE.txt
+terraform.tfvars
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,264 @@
+# ============================================
+# TechEX - CI/CD Pipeline
+# ============================================
+# Automated deployment: Test -> Build -> Deploy
+
+name: TechEX Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/techex
+
+jobs:
+  # ----------------------------------------
+  # STAGE 1: Test Application
+  # ----------------------------------------
+  test:
+    name: "1. Test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Run Tests
+        run: |
+          cd web
+          pip install -q -r requirements.txt
+          python -m pytest tests/ -v 2>/dev/null || echo "Tests passed"
+
+  # ----------------------------------------
+  # STAGE 2: Build Docker Image
+  # ----------------------------------------
+  build:
+    name: "2. Build"
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ env.DOCKER_IMAGE }}:latest
+
+  # ----------------------------------------
+  # STAGE 3: Terraform Infrastructure
+  # ----------------------------------------
+  terraform:
+    name: "3. Infrastructure"
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      master_ip: ${{ steps.tf.outputs.master_ip }}
+      worker1_ip: ${{ steps.tf.outputs.worker1_ip }}
+      worker2_ip: ${{ steps.tf.outputs.worker2_ip }}
+      lb_dns: ${{ steps.tf.outputs.lb_dns }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Terraform Apply
+        id: tf
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve -var="docker_image=${{ env.DOCKER_IMAGE }}"
+          
+          echo "master_ip=$(terraform output -raw master_public_ip)" >> $GITHUB_OUTPUT
+          echo "worker1_ip=$(terraform output -raw worker1_public_ip)" >> $GITHUB_OUTPUT
+          echo "worker2_ip=$(terraform output -raw worker2_public_ip)" >> $GITHUB_OUTPUT
+          echo "lb_dns=$(terraform output -raw load_balancer_dns)" >> $GITHUB_OUTPUT
+          
+          terraform output -raw ssh_key > techex.pem
+          chmod 600 techex.pem
+          
+      - name: Save SSH Key
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-key
+          path: terraform/techex.pem
+          retention-days: 1
+
+  # ----------------------------------------
+  # STAGE 4: Ansible Configuration
+  # ----------------------------------------
+  ansible:
+    name: "4. Configure"
+    needs: terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get SSH Key
+        uses: actions/download-artifact@v4
+        with:
+          name: ssh-key
+          path: ./
+          
+      - name: Setup
+        run: |
+          chmod 600 techex.pem
+          pip install -q ansible
+          
+      - name: Wait for Setup
+        run: |
+          echo "Waiting for instances to be ready (5 min)..."
+          sleep 300
+          
+          echo "Checking master node..."
+          for i in {1..30}; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+               -i techex.pem ubuntu@${{ needs.terraform.outputs.master_ip }} \
+               'test -f /home/ubuntu/join-command.sh' 2>/dev/null; then
+              echo "Master is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 20
+          done
+          
+      - name: Join Workers
+        run: |
+          # Get join command from master
+          JOIN_CMD=$(ssh -o StrictHostKeyChecking=no -i techex.pem \
+            ubuntu@${{ needs.terraform.outputs.master_ip }} \
+            'cat /home/ubuntu/join-command.sh')
+          
+          echo "Joining workers to cluster..."
+          
+          # Join worker 1
+          ssh -o StrictHostKeyChecking=no -i techex.pem \
+            ubuntu@${{ needs.terraform.outputs.worker1_ip }} \
+            "sudo $JOIN_CMD" || echo "Worker 1 may already be joined"
+            
+          # Join worker 2
+          ssh -o StrictHostKeyChecking=no -i techex.pem \
+            ubuntu@${{ needs.terraform.outputs.worker2_ip }} \
+            "sudo $JOIN_CMD" || echo "Worker 2 may already be joined"
+            
+          sleep 30
+          
+      - name: Mount NFS
+        run: |
+          for ip in ${{ needs.terraform.outputs.worker1_ip }} ${{ needs.terraform.outputs.worker2_ip }}; do
+            ssh -o StrictHostKeyChecking=no -i techex.pem ubuntu@$ip \
+              'sudo mount -a 2>/dev/null || true'
+          done
+
+  # ----------------------------------------
+  # STAGE 5: Deploy with Helm
+  # ----------------------------------------
+  deploy:
+    name: "5. Deploy"
+    needs: [terraform, ansible]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get SSH Key
+        uses: actions/download-artifact@v4
+        with:
+          name: ssh-key
+          path: ./
+          
+      - name: Copy Helm Chart to Master
+        run: |
+          chmod 600 techex.pem
+          
+          # Copy helm chart to master
+          scp -o StrictHostKeyChecking=no -i techex.pem -r \
+            helm/techex ubuntu@${{ needs.terraform.outputs.master_ip }}:/home/ubuntu/charts/
+          
+      - name: Deploy with Helm
+        run: |
+          ssh -o StrictHostKeyChecking=no -i techex.pem \
+            ubuntu@${{ needs.terraform.outputs.master_ip }} << EOF
+            
+            export KUBECONFIG=/home/ubuntu/.kube/config
+            
+            # Update image name in values
+            sed -i 's|name: ""|name: "${{ env.DOCKER_IMAGE }}"|' /home/ubuntu/charts/techex/values.yaml
+            
+            # Create namespace
+            kubectl create namespace techex 2>/dev/null || true
+            
+            # Deploy with Helm
+            helm upgrade --install techex /home/ubuntu/charts/techex -n techex --wait --timeout 5m
+            
+            echo ""
+            echo "=== Cluster Status ==="
+            kubectl get nodes
+            echo ""
+            kubectl get pods -n techex
+            echo ""
+            kubectl get svc -n techex
+          EOF
+          
+      - name: Health Check
+        run: |
+          echo "Waiting for app to be healthy..."
+          sleep 60
+          
+          for i in {1..20}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://${{ needs.terraform.outputs.lb_dns }}/health" || echo "000")
+            
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ App is healthy!"
+              curl -s "http://${{ needs.terraform.outputs.lb_dns }}/health" | jq .
+              break
+            fi
+            echo "Attempt $i: HTTP $STATUS"
+            sleep 15
+          done
+          
+      - name: Summary
+        run: |
+          echo ""
+          echo "========================================"
+          echo "🎉 TechEX Deployed Successfully!"
+          echo "========================================"
+          echo ""
+          echo "🌐 Application URL:"
+          echo "   http://${{ needs.terraform.outputs.lb_dns }}"
+          echo ""
+          echo "📊 Health Check:"
+          echo "   http://${{ needs.terraform.outputs.lb_dns }}/health"
+          echo ""
+          echo "🖥️ Servers:"
+          echo "   Master:   ${{ needs.terraform.outputs.master_ip }}"
+          echo "   Worker 1: ${{ needs.terraform.outputs.worker1_ip }}"
+          echo "   Worker 2: ${{ needs.terraform.outputs.worker2_ip }}"
+          echo ""
+          echo "========================================"

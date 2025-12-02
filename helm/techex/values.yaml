@@ -1,0 +1,13 @@
+replicas: 2
+
+image:
+  name: ""  # Set by CI/CD
+  tag: latest
+
+service:
+  port: 31415
+
+nfs:
+  server: "10.0.1.10"
+  path: /srv/nfs/techex-data
+

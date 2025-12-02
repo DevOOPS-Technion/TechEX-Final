@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: techex-app
+  labels:
+    app: techex
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: techex
+  template:
+    metadata:
+      labels:
+        app: techex
+    spec:
+      containers:
+      - name: techex
+        image: "{{ .Values.image.name }}:{{ .Values.image.tag }}"
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DATA_DIR
+          value: "/data"
+        volumeMounts:
+        - name: data-vol
+          mountPath: /data
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+      volumes:
+      - name: data-vol
+        persistentVolumeClaim:
+          claimName: techex-pvc
+
