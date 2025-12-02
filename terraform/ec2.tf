@@ -2,24 +2,9 @@
 # EC2 Instances - Kubernetes Cluster
 # ============================================
 
-# Get latest Ubuntu 22.04 AMI
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"]
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
-  }
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
 # Master Node (Control Plane + NFS)
 resource "aws_instance" "master" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.main.key_name
   subnet_id              = aws_subnet.public_1.id
@@ -36,7 +21,7 @@ resource "aws_instance" "master" {
 
   root_block_device {
     volume_size           = 25
-    volume_type           = "gp3"
+    volume_type           = "gp2"
     delete_on_termination = true
   }
 
@@ -50,7 +35,7 @@ resource "aws_instance" "master" {
 
 # Worker 1
 resource "aws_instance" "worker1" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.main.key_name
   subnet_id              = aws_subnet.public_1.id
@@ -63,7 +48,7 @@ resource "aws_instance" "worker1" {
 
   root_block_device {
     volume_size           = 25
-    volume_type           = "gp3"
+    volume_type           = "gp2"
     delete_on_termination = true
   }
 
@@ -77,7 +62,7 @@ resource "aws_instance" "worker1" {
 
 # Worker 2
 resource "aws_instance" "worker2" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.main.key_name
   subnet_id              = aws_subnet.public_2.id
@@ -90,7 +75,7 @@ resource "aws_instance" "worker2" {
 
   root_block_device {
     volume_size           = 25
-    volume_type           = "gp3"
+    volume_type           = "gp2"
     delete_on_termination = true
   }
 

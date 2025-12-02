@@ -49,3 +49,9 @@ variable "allowed_ssh_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "ami_id" {
+  description = "AMI ID for EC2 instances (Ubuntu 22.04)"
+  type        = string
+  default     = "ami-0c398cb65a93047f2"
+}
