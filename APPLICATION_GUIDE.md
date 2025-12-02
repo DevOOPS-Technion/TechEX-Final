@@ -27,7 +27,7 @@ Before starting, ensure you have:
 - **Docker Hub Account** - To store the container image
 - **AWS Academy Account** - To deploy infrastructure
 
-### Required Tools (Windows 11)
+### Required Tools (Windows)
 - **Git** - [Download](https://git-scm.com/download/win)
 - **Docker Desktop** (optional, for local testing) - [Download](https://www.docker.com/products/docker-desktop/)
 
@@ -45,10 +45,10 @@ git --version
 
 ```powershell
 # Clone your repository
-git clone https://github.com/YOUR_USERNAME/TechEX-main.git
+git clone https://github.com/DevOOPS-Technion/TechEX-Final.git
 
 # Navigate to the project folder
-cd TechEX-main
+cd TechEX-Final
 ```
 
 ### Step 2.2: Run Setup Helper
