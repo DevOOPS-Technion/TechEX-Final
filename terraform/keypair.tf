@@ -8,11 +8,11 @@ resource "tls_private_key" "ssh" {
 }
 
 resource "aws_key_pair" "main" {
-  key_name   = "${var.project_name}-keypair"
+  key_name   = "${var.project_name}-keypair-${random_id.suffix.hex}"
   public_key = tls_private_key.ssh.public_key_openssh
 
   tags = {
-    Name = "${var.project_name}-keypair"
+    Name = "${var.project_name}-keypair-${random_id.suffix.hex}"
   }
 }
 

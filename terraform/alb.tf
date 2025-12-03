@@ -3,19 +3,19 @@
 # ============================================
 
 resource "aws_lb" "main" {
-  name               = "${var.project_name}-lb"
+  name               = "${var.project_name}-lb-${random_id.suffix.hex}"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = [aws_subnet.public_1.id, aws_subnet.public_2.id]
 
   tags = {
-    Name = "${var.project_name}-lb"
+    Name = "${var.project_name}-lb-${random_id.suffix.hex}"
   }
 }
 
 resource "aws_lb_target_group" "app" {
-  name     = "${var.project_name}-tg"
+  name     = "${var.project_name}-tg-${random_id.suffix.hex}"
   port     = 31415
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
@@ -33,7 +33,7 @@ resource "aws_lb_target_group" "app" {
   }
 
   tags = {
-    Name = "${var.project_name}-tg"
+    Name = "${var.project_name}-tg-${random_id.suffix.hex}"
   }
 }
 
