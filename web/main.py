@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import os
 import threading
+import socket
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'JP4sAq44bZ4Z4rDqZ8i5Otcx2sd9O9RnEZGSJbB')
@@ -13,6 +14,10 @@ DATA_FILE = os.path.join(DATA_DIR, 'parcels.json')
 
 # Thread lock for file operations
 file_lock = threading.Lock()
+
+# Get node/pod information
+HOSTNAME = socket.gethostname()
+POD_NAME = os.environ.get('HOSTNAME', HOSTNAME)  # Kubernetes sets HOSTNAME env var
 
 # Debug static files
 static_path = os.path.join(os.getcwd(), 'static')
@@ -25,9 +30,18 @@ print(f"Flask static folder: {app.static_folder}")
 print(f"Flask static url path: {app.static_url_path}")
 print(f"Data directory: {DATA_DIR}")
 print(f"Data file: {DATA_FILE}")
+print(f"Pod/Node: {POD_NAME}")
 
 # Version of the program
 version = "2.0"
+
+# Inject node info into all templates
+@app.context_processor
+def inject_node_info():
+    return {
+        'node_name': POD_NAME,
+        'version': version
+    }
 
 # Default dummy data for initial deployment
 DEFAULT_PARCELS = [
@@ -152,8 +166,10 @@ def save_parcels(data):
             print(f"Error saving parcels: {e}")
             return False
 
-# Load initial data
-parcels_data = load_parcels()
+# Helper function to get fresh data (reads from NFS every time for consistency)
+def get_parcels():
+    """Get parcels - always reads fresh from file for multi-pod consistency"""
+    return load_parcels()
 
 # Health check endpoint for Kubernetes/Load Balancer
 @app.route('/health')
@@ -170,7 +186,8 @@ def readiness_check():
     """Readiness probe for Kubernetes"""
     try:
         # Check if we can access the data
-        if parcels_data is not None:
+        data = get_parcels()
+        if data is not None:
             return jsonify({'status': 'ready'}), 200
         return jsonify({'status': 'not ready'}), 503
     except Exception as e:
@@ -178,13 +195,14 @@ def readiness_check():
 
 def get_next_id():
     """Generate the next available ID"""
-    if parcels_data:
-        return str(max(int(parcel["id"]) for parcel in parcels_data) + 1)
+    parcels = get_parcels()
+    if parcels:
+        return str(max(int(parcel["id"]) for parcel in parcels) + 1)
     return "1"
 
 def find_parcel_by_id(parcel_id):
     """Find a parcel by its ID"""
-    for parcel in parcels_data:
+    for parcel in get_parcels():
         if parcel["id"] == parcel_id:
             return parcel
     return None
@@ -199,7 +217,7 @@ def validate_date(date_string):
 
 def is_tracking_number_unique(tracking_number, exclude_id=None):
     """Check if tracking number is unique"""
-    for parcel in parcels_data:
+    for parcel in get_parcels():
         if parcel["tracking_number"] == tracking_number and parcel["id"] != exclude_id:
             return False
     return True
@@ -207,12 +225,12 @@ def is_tracking_number_unique(tracking_number, exclude_id=None):
 @app.route('/')
 def index():
     """Home page"""
-    return render_template('index.html', version=version, parcels=parcels_data)
+    return render_template('index.html', version=version, parcels=get_parcels())
 
 @app.route('/parcels')
 def list_parcels():
     """List all parcels"""
-    return render_template('list_parcels.html', parcels=parcels_data)
+    return render_template('list_parcels.html', parcels=get_parcels())
 
 @app.route('/add_parcel', methods=['GET', 'POST'])
 def add_parcel():
@@ -279,8 +297,9 @@ def add_parcel():
             "delivery_date": None
         }
         
-        parcels_data.append(new_parcel)
-        save_parcels(parcels_data)
+        parcels = get_parcels()
+        parcels.append(new_parcel)
+        save_parcels(parcels)
         flash(f'Parcel {tracking_number} added successfully!', 'success')
         return redirect(url_for('list_parcels'))
     
@@ -289,7 +308,16 @@ def add_parcel():
 @app.route('/edit_parcel/<parcel_id>', methods=['GET', 'POST'])
 def edit_parcel(parcel_id):
     """Edit an existing parcel"""
-    parcel = find_parcel_by_id(parcel_id)
+    # Load fresh data for multi-pod consistency
+    parcels = get_parcels()
+    parcel = None
+    parcel_index = None
+    for i, p in enumerate(parcels):
+        if p["id"] == parcel_id:
+            parcel = p
+            parcel_index = i
+            break
+    
     if not parcel:
         flash('Parcel not found', 'error')
         return redirect(url_for('list_parcels'))
@@ -304,7 +332,8 @@ def edit_parcel(parcel_id):
                 parcel['status'] = value
                 if value == 'pending':
                     parcel['delivery_date'] = None
-                save_parcels(parcels_data)
+                parcels[parcel_index] = parcel
+                save_parcels(parcels)
                 flash('Status updated successfully!', 'success')
             else:
                 flash('Invalid status value', 'error')
@@ -313,12 +342,14 @@ def edit_parcel(parcel_id):
             if value.lower() == 'none' or value == '':
                 parcel['delivery_date'] = None
                 parcel['status'] = 'pending'
-                save_parcels(parcels_data)
+                parcels[parcel_index] = parcel
+                save_parcels(parcels)
                 flash('Delivery date cleared successfully!', 'success')
             elif validate_date(value):
                 parcel['delivery_date'] = value
                 parcel['status'] = 'delivered'
-                save_parcels(parcels_data)
+                parcels[parcel_index] = parcel
+                save_parcels(parcels)
                 flash('Delivery date updated successfully!', 'success')
             else:
                 flash('Invalid date format. Use YYYY-MM-DD', 'error')
@@ -330,7 +361,8 @@ def edit_parcel(parcel_id):
                     flash('Cost cannot be negative', 'error')
                 else:
                     parcel['cost'] = new_cost
-                    save_parcels(parcels_data)
+                    parcels[parcel_index] = parcel
+                    save_parcels(parcels)
                     flash('Cost updated successfully!', 'success')
             except ValueError:
                 flash('Invalid cost value', 'error')
@@ -342,7 +374,8 @@ def edit_parcel(parcel_id):
                     flash('Weight must be greater than 0', 'error')
                 else:
                     parcel['weight'] = new_weight
-                    save_parcels(parcels_data)
+                    parcels[parcel_index] = parcel
+                    save_parcels(parcels)
                     flash('Weight updated successfully!', 'success')
             except ValueError:
                 flash('Invalid weight value', 'error')
@@ -354,10 +387,12 @@ def edit_parcel(parcel_id):
 @app.route('/remove_parcel/<parcel_id>', methods=['POST'])
 def remove_parcel(parcel_id):
     """Remove a parcel"""
-    for i, parcel in enumerate(parcels_data):
+    # Load fresh data for multi-pod consistency
+    parcels = get_parcels()
+    for i, parcel in enumerate(parcels):
         if parcel["id"] == parcel_id:
-            removed_parcel = parcels_data.pop(i)
-            save_parcels(parcels_data)
+            removed_parcel = parcels.pop(i)
+            save_parcels(parcels)
             flash(f'Parcel {removed_parcel["tracking_number"]} removed successfully!', 'success')
             break
     else:
@@ -368,7 +403,8 @@ def remove_parcel(parcel_id):
 @app.route('/statistics')
 def statistics():
     """Display parcel statistics"""
-    if not parcels_data:
+    parcels = get_parcels()
+    if not parcels:
         stats = {
             'total_parcels': 0,
             'delivered_count': 0,
@@ -380,11 +416,11 @@ def statistics():
             'delivery_rate': 0
         }
     else:
-        total_parcels = len(parcels_data)
-        delivered_count = sum(1 for p in parcels_data if p["status"] == "delivered")
-        pending_count = sum(1 for p in parcels_data if p["status"] == "pending")
-        total_cost = sum(p["cost"] for p in parcels_data)
-        total_weight = sum(p["weight"] for p in parcels_data)
+        total_parcels = len(parcels)
+        delivered_count = sum(1 for p in parcels if p["status"] == "delivered")
+        pending_count = sum(1 for p in parcels if p["status"] == "pending")
+        total_cost = sum(p["cost"] for p in parcels)
+        total_weight = sum(p["weight"] for p in parcels)
         
         stats = {
             'total_parcels': total_parcels,
@@ -402,7 +438,7 @@ def statistics():
 @app.route('/api/parcels')
 def api_parcels():
     """API endpoint to get parcels data"""
-    return jsonify(parcels_data)
+    return jsonify(get_parcels())
 
 @app.route('/test')
 def test_daisyui():

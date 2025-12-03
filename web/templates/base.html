@@ -206,9 +206,13 @@
         <div>
             <p>
                 <i class="fas fa-copyright mr-1"></i>
-                2025 TechEX v{{ version or '1.0' }} - Parcel Tracking System
+                2025 TechEX v{{ version or '2.0' }} - Parcel Tracking System
                 <i class="fas fa-heart text-red-500 mx-2"></i>
                 Built with Flask & DaisyUI
+            </p>
+            <p class="text-xs opacity-60 mt-1">
+                <i class="fas fa-server mr-1"></i>
+                Served by: <span class="badge badge-sm badge-primary">{{ node_name or 'local' }}</span>
             </p>
         </div>
     </footer>
