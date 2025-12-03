@@ -19,16 +19,7 @@ terraform {
       source  = "hashicorp/local"
       version = "2.6.1"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "3.6.0"
-    }
   }
-}
-
-# Generate random suffix to avoid naming conflicts
-resource "random_id" "suffix" {
-  byte_length = 4
 }
 
 # AWS Provider - credentials from environment variables or GitHub secrets

@@ -83,6 +83,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Cleanup Old Resources
+        run: |
+          echo "Cleaning up existing resources if any..."
+          
+          # Delete key pair
+          aws ec2 delete-key-pair --key-name techex-keypair 2>/dev/null || true
+          
+          # Get and delete load balancer
+          LB_ARN=$(aws elbv2 describe-load-balancers --names techex-lb --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
+          if [ -n "$LB_ARN" ] && [ "$LB_ARN" != "None" ]; then
+            echo "Deleting load balancer..."
+            aws elbv2 delete-load-balancer --load-balancer-arn "$LB_ARN" || true
+            sleep 30
+          fi
+          
+          # Get and delete target group
+          TG_ARN=$(aws elbv2 describe-target-groups --names techex-tg --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
+          if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+            echo "Deleting target group..."
+            aws elbv2 delete-target-group --target-group-arn "$TG_ARN" || true
+          fi
+          
+          echo "✅ Cleanup complete"
           
       - name: Terraform Apply
         id: tf
