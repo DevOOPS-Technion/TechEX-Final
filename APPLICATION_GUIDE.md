@@ -1,24 +1,62 @@
 # TechEX - Complete User Guide
 
+> **[← Back to README](README.md)**
+
 This guide provides step-by-step instructions for deploying and using TechEX.
 
 ---
 
 ## Table of Contents
 
-1. [Prerequisites](#1-prerequisites)
-2. [Initial Setup](#2-initial-setup)
-3. [Configure GitHub Secrets](#3-configure-github-secrets)
-4. [Deploy the Application](#4-deploy-the-application)
-5. [Find the Application URL](#5-find-the-application-url)
-6. [Using the Application](#6-using-the-application)
-7. [API Endpoints](#7-api-endpoints)
-8. [Troubleshooting](#8-troubleshooting)
-9. [Cleanup](#9-cleanup)
+1. [Architecture Overview](#1-architecture-overview)
+2. [Prerequisites](#2-prerequisites)
+3. [Initial Setup](#3-initial-setup)
+4. [Configure GitHub Secrets](#4-configure-github-secrets)
+5. [Deploy the Application](#5-deploy-the-application)
+6. [Find the Application URL](#6-find-the-application-url)
+7. [Using the Application](#7-using-the-application)
+8. [API Endpoints](#8-api-endpoints)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Cleanup](#10-cleanup)
 
 ---
 
-## 1. Prerequisites
+## 1. Architecture Overview
+
+```
+                    Internet
+                        │
+              ┌─────────▼─────────┐
+              │   Load Balancer   │  ← Port 80
+              │   (AWS ALB)       │
+              └─────────┬─────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        │               │               │
+   ┌────▼────┐    ┌────▼────┐    ┌────▼────┐
+   │ Master  │    │ Worker1 │    │ Worker2 │
+   │10.0.1.10│    │10.0.1.11│    │10.0.2.11│
+   │ +NFS    │    │NodePort │    │NodePort │
+   └────┬────┘    └────┬────┘    └────┬────┘
+        │              │              │
+        └──────────────┴──────────────┘
+                   NFS Share
+              /srv/nfs/techex-data
+```
+
+**CI/CD Pipeline Stages:**
+
+| Stage | Description |
+|-------|-------------|
+| **1. Test** | Run Python unit tests |
+| **2. Build** | Build & push Docker image to Docker Hub |
+| **3. Infrastructure** | Terraform provisions 3 EC2s + ALB |
+| **4. Configure** | Join workers to K8s cluster + mount NFS |
+| **5. Deploy** | Helm deploys app to Kubernetes |
+
+---
+
+## 2. Prerequisites
 
 Before starting, ensure you have:
 
@@ -39,9 +77,9 @@ git --version
 
 ---
 
-## 2. Initial Setup
+## 3. Initial Setup
 
-### Step 2.1: Clone the Repository
+### Step 3.1: Clone the Repository
 
 ```powershell
 # Clone your repository
@@ -51,7 +89,7 @@ git clone https://github.com/DevOOPS-Technion/TechEX-Final.git
 cd TechEX-Final
 ```
 
-### Step 2.2: Run Setup Helper
+### Step 3.2: Run Setup Helper
 
 ```powershell
 # Run the deployment helper script
@@ -62,9 +100,9 @@ This creates a `SECRETS_TEMPLATE.txt` file with the required secrets.
 
 ---
 
-## 3. Configure GitHub Secrets
+## 4. Configure GitHub Secrets
 
-### Step 3.1: Get Your AWS Academy Credentials
+### Step 4.1: Get Your AWS Academy Credentials
 
 1. Go to [AWS Academy](https://awsacademy.instructure.com/)
 2. Open your **Learner Lab**
@@ -81,7 +119,7 @@ This creates a `SECRETS_TEMPLATE.txt` file with the required secrets.
 
 ⚠️ **Important:** AWS Academy credentials expire every ~4 hours. You'll need to update them before each deployment.
 
-### Step 3.2: Get Docker Hub Token
+### Step 4.2: Get Docker Hub Token 
 
 1. Go to [Docker Hub](https://hub.docker.com/)
 2. Click your username → **Account Settings**
@@ -89,7 +127,7 @@ This creates a `SECRETS_TEMPLATE.txt` file with the required secrets.
 4. Give it a name (e.g., "TechEX") and click **Generate**
 5. Copy the token (you won't see it again!)
 
-### Step 3.3: Add Secrets to GitHub
+### Step 4.3: Add Secrets to GitHub
 
 1. Go to your GitHub repository
 2. Click **Settings** (tab)
@@ -105,7 +143,7 @@ This creates a `SECRETS_TEMPLATE.txt` file with the required secrets.
 | `DOCKERHUB_USERNAME` | Your username | Docker Hub username |
 | `DOCKERHUB_TOKEN` | Your token | Docker Hub access token |
 
-### Step 3.4: Update AWS Credentials (Before Each Deploy)
+### Step 4.4: Update AWS Credentials (Before Each Deploy)
 
 Since AWS Academy credentials expire, update them before deploying:
 
@@ -118,13 +156,13 @@ Since AWS Academy credentials expire, update them before deploying:
 
 ---
 
-## 4. Deploy the Application
+## 5. Deploy the Application
 
-### Step 4.1: Make Sure AWS Credentials Are Fresh
+### Step 5.1: Make Sure AWS Credentials Are Fresh
 
 Before deploying, ensure your AWS Academy lab is **started** and credentials are updated in GitHub secrets.
 
-### Step 4.2: Commit and Push
+### Step 5.2: Commit and Push
 
 ```powershell
 # Stage all files
@@ -137,7 +175,7 @@ git commit -m "Deploy TechEX application"
 git push origin main
 ```
 
-### Step 4.3: Monitor the Pipeline
+### Step 5.3: Monitor the Pipeline
 
 1. Go to your GitHub repository
 2. Click **Actions** tab
@@ -173,7 +211,7 @@ git push origin main
 3. Find `techex-lb`
 4. Copy the **DNS name**
 
-### Step 5.1: Test the Application
+### Step 6.1: Test the Application
 
 Open your browser and go to:
 ```
@@ -199,9 +237,9 @@ You should see:
 
 ---
 
-## 6. Using the Application
+## 7. Using the Application
 
-### 6.1 Home Page
+### 7.1 Home Page
 
 **URL:** `http://<load-balancer-dns>/`
 
@@ -209,7 +247,7 @@ You should see:
 - See quick statistics
 - Navigate to other pages
 
-### 6.2 View All Parcels
+### 7.2 View All Parcels
 
 **URL:** `http://<load-balancer-dns>/parcels`
 
@@ -218,7 +256,7 @@ You should see:
 - Click **Edit** to modify a parcel
 - Click **Remove** to delete a parcel
 
-### 6.3 Add New Parcel
+### 7.3 Add New Parcel
 
 **URL:** `http://<load-balancer-dns>/add_parcel`
 
@@ -237,7 +275,7 @@ Fill in the form with:
 
 Click **Add Parcel** to save.
 
-### 6.4 Edit a Parcel
+### 7.4 Edit a Parcel
 
 **URL:** `http://<load-balancer-dns>/edit_parcel/<id>`
 
@@ -260,7 +298,7 @@ See:
 
 ---
 
-## 7. API Endpoints
+## 8. API Endpoints
 
 ### Get All Parcels (JSON)
 
@@ -297,7 +335,7 @@ curl http://<load-balancer-dns>/ready
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 ### Problem: Pipeline Fails at "Infrastructure" Stage
 
@@ -367,7 +405,7 @@ ssh ubuntu@<worker-ip> 'sudo systemctl status kubelet'
 
 ---
 
-## 9. Cleanup
+## 10. Cleanup
 
 ### Delete All AWS Resources
 
